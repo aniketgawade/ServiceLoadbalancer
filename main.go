@@ -17,7 +17,7 @@ import (
 	"text/template"
 )
 
-var delete_all = true
+var delete_all = false
 var (
 	/*
 	 *  Docker API
@@ -45,6 +45,7 @@ var (
 	service_protocol    string
 	overwrite_vip	    string
 	lb_algo 	    string
+	delete_lb	    bool 
 )
 
 const networkShowDetail = `  Network: {{.Name}}
@@ -107,6 +108,8 @@ func InitFlags() {
 		"Load balancer overwrite vip ")
 	flag.StringVar(&lb_algo, "algo", "ROUND_ROBIN",
 		"Load balancer algorithm")
+	flag.BoolVar(&delete_lb, "delete", false,
+		"Load balancer delete obj")
 }
 
 func CreateLoadBalancer(name string) {
@@ -148,10 +151,6 @@ func CreateLoadBalancer(name string) {
 		} else {
 			props.VipAddress = getDockerServiceVip(name)
 		}
-
-		lb_instance.SetLoadbalancerProperties(props)
-		//fmt.Printf("%v", lb_instance)	
-		//Creating native load balancer 
 		var networkFQName bytes.Buffer
 		networkFQName.WriteString("default-domain:")
 		networkFQName.WriteString(os_tenant_name)
@@ -159,6 +158,9 @@ func CreateLoadBalancer(name string) {
 		networkFQName.WriteString(getDockerServiceNetwork(name))
 		fmt.Printf("----->> %s\n", networkFQName.String())
 		networkObj, err := types.VirtualNetworkByName(oc_client, networkFQName.String())
+		props.VipSubnetId = getSubnetFromNetwork(networkObj)
+		props.AdminState = true
+		lb_instance.SetLoadbalancerProperties(props)
 		//if interface_obj == nil {
 			interface_obj := new(types.VirtualMachineInterface)
 			interface_obj.SetName(name + "_" + randomdata.SillyName())
@@ -233,6 +235,10 @@ func CreateLoadBalancer(name string) {
 		listener_prop := new(types.LoadbalancerListenerType)
 		listener_prop.Protocol = service_protocol
 		listener_prop.ProtocolPort = service_port
+		listener_prop.AdminState = true
+		listener_prop.ConnectionLimit = 100
+		listener_prop.DefaultTlsContainer = "EMPTY"
+		listener_prop.SniContainers = ([]string{"EMPTY"})
 		lbl_instance.SetLoadbalancerListenerProperties(listener_prop)
 		lbl_instance.AddLoadbalancer(lb_instance)
 		err = oc_client.Create(lbl_instance)
@@ -266,6 +272,15 @@ func CreateLoadBalancer(name string) {
 		lbpool_prop := new(types.LoadbalancerPoolType)
 		lbpool_prop.Protocol = service_protocol
 		lbpool_prop.LoadbalancerMethod = lb_algo
+		var networkFQName bytes.Buffer
+		networkFQName.WriteString("default-domain:")
+		networkFQName.WriteString(os_tenant_name)
+		networkFQName.WriteString(":")
+		networkFQName.WriteString(getDockerServiceNetwork(name))
+		//fmt.Printf("----->> %s\n", networkFQName.String())
+		networkObj, err := types.VirtualNetworkByName(oc_client, networkFQName.String())
+		lbpool_prop.SubnetId = getSubnetFromNetwork(networkObj)
+		lbpool_prop.AdminState = true
 		lbpool_instance.SetLoadbalancerPoolProperties(lbpool_prop)
 		lbpool_instance.AddLoadbalancerListener(lbl_instance)
 		err = oc_client.Create(lbpool_instance)
@@ -298,9 +313,26 @@ func CreateLoadBalancer(name string) {
 			lbmemb_instance.SetParent(lbpool_instance)
 			lbmemb_instance.SetName(lbmemb_name)
 			lbmemb_instance.SetDisplayName(lbmemb_name)
+			endpointId := getEndpointFromContainerId(lb_container)
+			var vmiFQName bytes.Buffer
+			vmiFQName.WriteString("default-domain:")
+			vmiFQName.WriteString(os_tenant_name)
+			vmiFQName.WriteString(":")
+			vmiFQName.WriteString(endpointId)
+			vmiObj, err := types.VirtualMachineInterfaceByName(oc_client, vmiFQName.String())
+			fmt.Printf("VMI----->> %s\n", vmiObj.GetUuid())
+			memKeyValuePair := new(types.KeyValuePairs)
+			memKeyValue := new(types.KeyValuePair)
+			memKeyValue.Key = "vmi"
+			memKeyValue.Value = vmiObj.GetUuid()
+			memKeyValuePair.AddKeyValuePair(memKeyValue)
+			lbmemb_instance.SetAnnotations(memKeyValuePair)
 			member_prop := new(types.LoadbalancerMemberType)
 			member_prop.Address = container_ip
 			member_prop.ProtocolPort = service_port
+			member_prop.Status = "ACTIVE"
+			member_prop.AdminState = true
+			member_prop.Weight = 1
 			lbmemb_instance.SetLoadbalancerMemberProperties(member_prop)
 			err = oc_client.Create(lbmemb_instance)
 			if err != nil {
@@ -359,13 +391,16 @@ func CreateLoadBalancer(name string) {
 			os.Exit(1)
 		}
 		for _, vmi_ref := range vmi_refs {
-		virtual_machine_interface_obj, err := oc_client.FindByUuid("virtual-machine-interface", vmi_ref.Uuid)
+			virtual_machine_interface_obj, err := oc_client.FindByUuid("virtual-machine-interface", vmi_ref.Uuid)
 			iip_refs, err := virtual_machine_interface_obj.(*types.VirtualMachineInterface).GetInstanceIpBackRefs()
 			if err != nil {
 		    		fmt.Printf("Error in retriving iip from vmi %s: %v", virtual_machine_interface_obj.GetUuid(), err)
 		    		return
 			}
 			for _, iip_ref := range iip_refs {
+				iip_obj, err := oc_client.FindByUuid("instance-ip", iip_ref.Uuid)
+				floating_obj, _ := iip_obj.(*types.InstanceIp).GetFloatingIps()
+				err = oc_client.DeleteByUuid("floating-ip",floating_obj[0].Uuid)
 		    		err = oc_client.DeleteByUuid("instance-ip", iip_ref.Uuid)
 				if err != nil {
 					fmt.Printf("Error in finding instance ip\n")
@@ -380,7 +415,106 @@ func CreateLoadBalancer(name string) {
 				os.Exit(1)
 			}
 		}
-		//lb_instance.ClearVirtualMachineInterface()
+	}
+}
+
+
+func DeleteLoadBalancer(name string) {
+	//Find if loadbalancer already exist
+	var fqn []string
+	fqn = append(fqn, "default-domain")
+	fqn = append(fqn, os_tenant_name)
+	fqn = append(fqn, name)
+	lb_instance, _ := types.LoadbalancerByName(oc_client , strings.Join(fqn, ":"))
+	
+	//Find if loadbalancer listener already exist
+	var fqn_lbl []string
+	fqn_lbl = append(fqn_lbl, "default-domain")
+	fqn_lbl = append(fqn_lbl, os_tenant_name)
+	lbl_slice_name := [] string{name, "listener"}
+	lbl_name := strings.Join(lbl_slice_name, "_")
+	fqn_lbl = append(fqn_lbl, lbl_name)
+	lbl_instance, _ := types.LoadbalancerListenerByName(oc_client , strings.Join(fqn_lbl, ":"))
+
+	var fqn_lbpool []string
+	fqn_lbpool = append(fqn_lbpool, "default-domain")
+	fqn_lbpool = append(fqn_lbpool, os_tenant_name)
+	lbpool_slice_name := [] string{name, "pool"}
+	lbpool_name := strings.Join(lbpool_slice_name, "_")
+	fqn_lbpool = append(fqn_lbpool, lbpool_name)
+	lbpool_instance, _ := types.LoadbalancerPoolByName(oc_client , strings.Join(fqn_lbpool, ":"))
+	
+	if true {
+		fmt.Println("Deleting everything")
+		vmi_refs, err := lb_instance.GetVirtualMachineInterfaceRefs()
+		if err != nil {
+			fmt.Printf("Error in retriving vmi from load balancer %s: %v", lb_instance.GetUuid(), err)
+			return
+		}
+		for lb_container, _ := range getAllContainersIpInService(name) {	
+			var fqn_lbmemb []string
+			fqn_lbmemb = append(fqn_lbmemb, "default-domain")
+			fqn_lbmemb = append(fqn_lbmemb, os_tenant_name)
+			fqn_lbmemb = append(fqn_lbmemb, lbpool_name)
+			lbmemb_slice_name := [] string{lb_container, "member"}
+			lbmemb_name := strings.Join(lbmemb_slice_name, "_")
+			fqn_lbmemb = append(fqn_lbmemb, lbmemb_name)
+			lbmemb_instance, _ := types.LoadbalancerMemberByName(oc_client , strings.Join(fqn_lbmemb, ":"))
+			err = oc_client.Delete(lbmemb_instance)
+			if err != nil {
+				fmt.Printf("Error in deleting lb member\n")
+				fmt.Fprint(os.Stderr, err)
+				os.Exit(1)
+			}
+		}
+		err = oc_client.Delete(lbpool_instance)
+		if err != nil {
+			fmt.Printf("Error in deleting lb pool\n")
+			fmt.Fprint(os.Stderr, err)
+			os.Exit(1)
+		}
+		err = oc_client.Delete(lbl_instance)
+		if err != nil {
+			fmt.Printf("Error in deleting lb listener instance\n")
+			fmt.Fprint(os.Stderr, err)
+			os.Exit(1)
+		}
+		err = oc_client.Delete(lb_instance)
+		if err != nil {
+			fmt.Printf("Error in deleting lb instance \n")
+			fmt.Fprint(os.Stderr, err)
+			os.Exit(1)
+		}
+		for _, vmi_ref := range vmi_refs {
+			virtual_machine_interface_obj, err := oc_client.FindByUuid("virtual-machine-interface", vmi_ref.Uuid)
+			iip_refs, err := virtual_machine_interface_obj.(*types.VirtualMachineInterface).GetInstanceIpBackRefs()
+			if err != nil {
+		    		fmt.Printf("Error in retriving iip from vmi %s: %v", virtual_machine_interface_obj.GetUuid(), err)
+		    		return
+			}
+			for _, iip_ref := range iip_refs {
+				iip_obj, err := oc_client.FindByUuid("instance-ip", iip_ref.Uuid)
+				floating_obj, err := iip_obj.(*types.InstanceIp).GetFloatingIps()
+				err = oc_client.DeleteByUuid("floating-ip",floating_obj[0].Uuid)
+				if err != nil {
+					fmt.Printf("Error in finding floating ip\n")
+					fmt.Fprint(os.Stderr, err)
+					os.Exit(1)
+				}
+		    		err = oc_client.DeleteByUuid("instance-ip", iip_ref.Uuid)
+				if err != nil {
+					fmt.Printf("Error in finding instance ip\n")
+					fmt.Fprint(os.Stderr, err)
+					os.Exit(1)
+				}
+			}
+			err = oc_client.DeleteByUuid("virtual-machine-interface", vmi_ref.Uuid)
+			if err != nil {
+				fmt.Printf("Error in finding vmi\n")
+				fmt.Fprint(os.Stderr, err)
+				os.Exit(1)
+			}
+		}
 	}
 }
 
@@ -416,7 +550,17 @@ func getDockerServiceVip(service_name string) string {
 	}
 	return "ERR"
 }
-
+func getEndpointFromContainerId(container_id string) string {
+	container_info, err := docker_cli.ContainerInspect(context.Background(), container_id)
+	if err != nil {
+		panic(err)
+	}
+	for _, net_value := range (container_info.NetworkSettings.Networks) {
+		fmt.Println("EndpointId : ", net_value.EndpointID)	
+		return net_value.EndpointID
+	}
+	return "ERR"
+}
 func getAllContainersIpInService(service_name string) map[string]string {
 	container_map := make(map[string]string)
 	containers, err := docker_cli.ContainerList(context.Background(), docker_types.ContainerListOptions{})
@@ -440,6 +584,15 @@ func getAllContainersIpInService(service_name string) map[string]string {
 		}
 	}
 	return container_map
+}
+
+func getSubnetFromNetwork(networkObj *types.VirtualNetwork) string {
+	net_ipams, _ := networkObj.GetNetworkIpamRefs()
+	for _, net_ipam := range net_ipams {
+		fmt.Printf("Subnet uuid: %s\n", net_ipam.Attr.(types.VnSubnetsType).IpamSubnets[0].SubnetUuid)
+		return net_ipam.Attr.(types.VnSubnetsType).IpamSubnets[0].SubnetUuid
+	}
+	return "ERR"
 }
 
 func main() {
@@ -493,5 +646,10 @@ func main() {
 	fmt.Printf("^^^^^^^^^^^^^ %s\n", getDockerServiceNetwork(service_name))
 	//getAllContainersIpInService(service_name)
 	//getDockerServiceNetwork(service_name)
+	if delete_lb == true {	
+		DeleteLoadBalancer(service_name)
+		return
+	}
 	CreateLoadBalancer(service_name)
+	//getEndpointFromContainerId("ce74eed0bc2b466503e72b41372b3525438f0c23deae6f43870248929e978f56")
 }
