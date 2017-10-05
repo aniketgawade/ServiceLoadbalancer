@@ -41,6 +41,7 @@ var (
 	 * Service defaults
 	 */
 	service_name   	    string
+	fip_pool_arg 	    string
 	service_port        int
 	service_protocol    string
 	overwrite_vip	    string
@@ -110,6 +111,8 @@ func InitFlags() {
 		"Load balancer algorithm")
 	flag.BoolVar(&delete_lb, "delete", false,
 		"Load balancer delete obj")
+	flag.StringVar(&fip_pool_arg, "floating-ip", "",
+		"Floating ip for vip")
 }
 
 func CreateLoadBalancer(name string) {
@@ -203,6 +206,9 @@ func CreateLoadBalancer(name string) {
 				os.Exit(1)
 			}
 		//}
+		if len(fip_pool_arg) != 0 {
+			addFloatingIp(interface_obj.GetUuid(), fip_pool_arg)
+		}
 		lb_instance.AddVirtualMachineInterface(interface_obj)
 		err = oc_client.Create(lb_instance)
 		if err != nil {
@@ -403,14 +409,14 @@ func CreateLoadBalancer(name string) {
 				err = oc_client.DeleteByUuid("floating-ip",floating_obj[0].Uuid)
 		    		err = oc_client.DeleteByUuid("instance-ip", iip_ref.Uuid)
 				if err != nil {
-					fmt.Printf("Error in finding instance ip\n")
+					fmt.Printf("Error in  deleteing instance ip\n")
 					fmt.Fprint(os.Stderr, err)
 					os.Exit(1)
 				}
 			}
 			err = oc_client.DeleteByUuid("virtual-machine-interface", vmi_ref.Uuid)
 			if err != nil {
-				fmt.Printf("Error in finding vmi\n")
+				fmt.Printf("Error in deleting vmi\n")
 				fmt.Fprint(os.Stderr, err)
 				os.Exit(1)
 			}
@@ -487,6 +493,19 @@ func DeleteLoadBalancer(name string) {
 		}
 		for _, vmi_ref := range vmi_refs {
 			virtual_machine_interface_obj, err := oc_client.FindByUuid("virtual-machine-interface", vmi_ref.Uuid)
+			float_refs, err := virtual_machine_interface_obj.(*types.VirtualMachineInterface).GetFloatingIpBackRefs()
+			if err != nil {
+		    		fmt.Printf("Error in retriving float-ip from vmi %s: %v", virtual_machine_interface_obj.GetUuid(), err)
+		    		return
+			}
+			for _, float_ref := range float_refs {
+				err := oc_client.DeleteByUuid("floating-ip", float_ref.Uuid)
+				if err != nil {
+					fmt.Printf("Error in deleting floating ip\n")
+					fmt.Fprint(os.Stderr, err)
+					os.Exit(1)
+				}
+			}
 			iip_refs, err := virtual_machine_interface_obj.(*types.VirtualMachineInterface).GetInstanceIpBackRefs()
 			if err != nil {
 		    		fmt.Printf("Error in retriving iip from vmi %s: %v", virtual_machine_interface_obj.GetUuid(), err)
@@ -495,22 +514,24 @@ func DeleteLoadBalancer(name string) {
 			for _, iip_ref := range iip_refs {
 				iip_obj, err := oc_client.FindByUuid("instance-ip", iip_ref.Uuid)
 				floating_obj, err := iip_obj.(*types.InstanceIp).GetFloatingIps()
-				err = oc_client.DeleteByUuid("floating-ip",floating_obj[0].Uuid)
-				if err != nil {
-					fmt.Printf("Error in finding floating ip\n")
-					fmt.Fprint(os.Stderr, err)
-					os.Exit(1)
+				if floating_obj != nil {
+					err = oc_client.DeleteByUuid("floating-ip",floating_obj[0].Uuid)
+					if err != nil {
+						fmt.Printf("Error in deleting floating ip\n")
+						fmt.Fprint(os.Stderr, err)
+						os.Exit(1)
+					}
 				}
 		    		err = oc_client.DeleteByUuid("instance-ip", iip_ref.Uuid)
 				if err != nil {
-					fmt.Printf("Error in finding instance ip\n")
+					fmt.Printf("Error in deleteing instance ip\n")
 					fmt.Fprint(os.Stderr, err)
 					os.Exit(1)
 				}
 			}
 			err = oc_client.DeleteByUuid("virtual-machine-interface", vmi_ref.Uuid)
 			if err != nil {
-				fmt.Printf("Error in finding vmi\n")
+				fmt.Printf("Error in deleting vmi\n")
 				fmt.Fprint(os.Stderr, err)
 				os.Exit(1)
 			}
@@ -595,6 +616,58 @@ func getSubnetFromNetwork(networkObj *types.VirtualNetwork) string {
 	return "ERR"
 }
 
+func addFloatingIp(vmi_uuid string, fip_pool_arg string) {
+	projectId, err := config.GetProjectId(
+		oc_client, os_tenant_name, "")
+	if err != nil {
+		fmt.Printf("Error in finding project by uuid\n")
+		fmt.Fprint(os.Stderr, err)
+		os.Exit(1)
+	}
+	project_obj, err := oc_client.FindByUuid("project", projectId)
+	if err != nil {
+		fmt.Printf("Error in finding project obj\n")
+		fmt.Fprint(os.Stderr, err)
+		os.Exit(1)
+	}
+	interface_obj, err := oc_client.FindByUuid("virtual-machine-interface", vmi_uuid)
+	if err != nil {
+		fmt.Printf("Error in finding interface obj\n")
+		fmt.Fprint(os.Stderr, err)
+		os.Exit(1)
+	}
+	fip_arr := strings.Split(fip_pool_arg, ":")
+    	public_network, fip_pool, ip_addr := fip_arr[0], fip_arr[1], fip_arr[2]
+	fmt.Println(public_network, fip_pool, ip_addr)
+	var fqn_fippool []string
+	fqn_fippool = append(fqn_fippool, "default-domain")
+	fqn_fippool = append(fqn_fippool, os_tenant_name)
+	fqn_fippool = append(fqn_fippool, public_network)
+	fqn_fippool = append(fqn_fippool, fip_pool)
+	fmt.Println(strings.Join(fqn_fippool, ":"))
+	fip_pool_obj, err := types.FloatingIpPoolByName(oc_client , strings.Join(fqn_fippool, ":"))
+	if err != nil {
+		fmt.Printf("Error in finding fip pool obj\n")
+		fmt.Fprint(os.Stderr, err)
+		os.Exit(1)
+	}
+	floating_obj := new(types.FloatingIp)
+	floating_obj.SetParent(fip_pool_obj)
+	floating_obj.AddProject(project_obj.(*types.Project))
+	floating_obj.SetFloatingIpAddress(ip_addr)
+	floating_obj.AddVirtualMachineInterface(interface_obj.(*types.VirtualMachineInterface))
+	floating_obj.SetName(randomdata.SillyName())
+	floating_obj.SetFloatingIpIsVirtualIp(true)
+	err = oc_client.Create(floating_obj)
+	if err != nil {
+		fmt.Printf("Error in creating floating ip instance\n")
+		fmt.Fprint(os.Stderr, err)
+		os.Exit(1)
+	}
+	
+		
+}
+
 func main() {
 	InitFlags()
 	flag.Usage = usage
@@ -616,40 +689,16 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-/*
-	services, err := cli.ServiceList(context.Background(), docker_types.ServiceListOptions{})
-	if err != nil {
-		panic(err)
-	}
 
-	for _, service := range services {
-		//spew.Dump(service)
-		fmt.Println("->>>>", service.Spec.Annotations.Name)
-		fmt.Println("->>>>", service.Endpoint.VirtualIPs[0].Addr)
-	}
-	containers, err := cli.ContainerList(context.Background(), docker_types.ContainerListOptions{})
-	if err != nil {
-		panic(err)
-	}
-
-	for _, container := range containers {
-		spew.Dump(container.Labels)
-		fmt.Println(container.ID)
-		for label, value := range container.Labels {
-	 		if (label == "com.docker.swarm.service.name") {
-				fmt.Println("->>>>", value)
-			}
-		}
-	}
-*/
-
-	fmt.Printf("^^^^^^^^^^^^^ %s\n", getDockerServiceNetwork(service_name))
+	//fmt.Printf("^^^^^^^^^^^^^ %s\n", getDockerServiceNetwork(service_name))
 	//getAllContainersIpInService(service_name)
 	//getDockerServiceNetwork(service_name)
 	if delete_lb == true {	
 		DeleteLoadBalancer(service_name)
 		return
 	}
+	//addFloatingIp("19fb9b9e-3ace-4d00-9606-9bc9e3d040ca", fip_pool_arg)
 	CreateLoadBalancer(service_name)
 	//getEndpointFromContainerId("ce74eed0bc2b466503e72b41372b3525438f0c23deae6f43870248929e978f56")
+	
 }
