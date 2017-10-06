@@ -43,6 +43,7 @@ var (
 	service_name   	    string
 	fip_pool_arg 	    string
 	sec_grps	    string
+	delete_sec_grps	    string
 	service_port        int
 	service_protocol    string
 	overwrite_vip	    string
@@ -114,8 +115,10 @@ func InitFlags() {
 		"Load balancer delete obj")
 	flag.StringVar(&fip_pool_arg, "floating-ip", "",
 		"Floating ip for vip")
-	flag.StringVar(&sec_grps, "security-groups", "",
-		"Security groups for instances")
+	flag.StringVar(&sec_grps, "security-group", "",
+		"Security group for service")
+	flag.StringVar(&delete_sec_grps, "delete-security-group", "",
+		"Delete security group for service")
 }
 
 func CreateLoadBalancer(name string) {
@@ -663,7 +666,7 @@ func addFloatingIp(vmi_uuid string, fip_pool_arg string) {
 	floating_obj.SetFloatingIpIsVirtualIp(true)
 	err = oc_client.Create(floating_obj)
 	if err != nil {
-		fmt.Printf("Error in creating floating ip instance\n")
+		fmt.Printf("Error in updating security grp  instance\n")
 		fmt.Fprint(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -671,7 +674,7 @@ func addFloatingIp(vmi_uuid string, fip_pool_arg string) {
 		
 }
 
-func applySecurityGroups(){
+func deleteSecurityGroups(){
 	for lb_container, _ := range getAllContainersIpInService(service_name) {	
 		endpointId := getEndpointFromContainerId(lb_container)
 		var vmiFQName bytes.Buffer
@@ -686,7 +689,45 @@ func applySecurityGroups(){
 			fmt.Fprint(os.Stderr, err)
 			os.Exit(1)
 		}
-		/*
+		
+		var secFQName bytes.Buffer
+		secFQName.WriteString("default-domain:")
+		secFQName.WriteString(os_tenant_name)
+		secFQName.WriteString(":")
+		secFQName.WriteString(delete_sec_grps)
+		fmt.Println(secFQName.String())
+		secObj, err := types.SecurityGroupByName(oc_client, secFQName.String())
+		if err != nil {
+			fmt.Printf("Error in finding security grp instance\n")
+			fmt.Fprint(os.Stderr, err)
+			os.Exit(1)
+		}
+		vmiObj.DeleteSecurityGroup(secObj.GetUuid())
+		err = oc_client.Update(vmiObj)
+		if err != nil {
+			fmt.Printf("Error in updating security grp instance\n")
+			fmt.Fprint(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+}
+
+func applySecurityGroups() {
+	for lb_container, _ := range getAllContainersIpInService(service_name) {	
+		endpointId := getEndpointFromContainerId(lb_container)
+		var vmiFQName bytes.Buffer
+		vmiFQName.WriteString("default-domain:")
+		vmiFQName.WriteString(os_tenant_name)
+		vmiFQName.WriteString(":")
+		vmiFQName.WriteString(endpointId)
+		fmt.Println(vmiFQName.String())
+		vmiObj, err := types.VirtualMachineInterfaceByName(oc_client, vmiFQName.String())
+		if err != nil {
+			fmt.Printf("Error in finding vmi instance\n")
+			fmt.Fprint(os.Stderr, err)
+			os.Exit(1)
+		}
+		
 		var secFQName bytes.Buffer
 		secFQName.WriteString("default-domain:")
 		secFQName.WriteString(os_tenant_name)
@@ -694,8 +735,8 @@ func applySecurityGroups(){
 		secFQName.WriteString(sec_grps)
 		fmt.Println(secFQName.String())
 		secObj, err := types.SecurityGroupByName(oc_client, secFQName.String())
-		*/
-		secObj, err := types.SecurityGroupByUuid(oc_client, "709438cc-7fe2-4401-8e36-d4ca6d996608")
+		
+		//secObj, err := types.SecurityGroupByUuid(oc_client, "709438cc-7fe2-4401-8e36-d4ca6d996608")
 		if err != nil {
 			fmt.Printf("Error in finding security grp instance\n")
 			fmt.Fprint(os.Stderr, err)
@@ -710,6 +751,7 @@ func applySecurityGroups(){
 		}
 	}
 }
+
 func main() {
 	InitFlags()
 	flag.Usage = usage
@@ -725,7 +767,7 @@ func main() {
 	oc_client = contrail.NewClient(oc_server, oc_port)
 	//networkList(oc_client)
 
-	fmt.Println("Loadbalancing service name: ", service_name)
+	fmt.Println("Service name: ", service_name)
 	var err error
 	docker_cli, err = docker_client.NewEnvClient()
 	if err != nil {
@@ -735,6 +777,16 @@ func main() {
 	//fmt.Printf("^^^^^^^^^^^^^ %s\n", getDockerServiceNetwork(service_name))
 	//getAllContainersIpInService(service_name)
 	//getDockerServiceNetwork(service_name)
+	if len(delete_sec_grps) != 0 {
+		fmt.Printf("Removing security group : %s", delete_sec_grps)
+		deleteSecurityGroups()
+		return
+	}
+	if len(sec_grps) != 0 {
+		fmt.Printf(" Apply security group : %s", sec_grps)
+		applySecurityGroups()
+		return
+	}
 	if delete_lb == true {	
 		DeleteLoadBalancer(service_name)
 		return
@@ -742,5 +794,4 @@ func main() {
 	//addFloatingIp("19fb9b9e-3ace-4d00-9606-9bc9e3d040ca", fip_pool_arg)
 	CreateLoadBalancer(service_name)
 	//getEndpointFromContainerId("ce74eed0bc2b466503e72b41372b3525438f0c23deae6f43870248929e978f56")
-	applySecurityGroups()
 }
