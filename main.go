@@ -113,8 +113,8 @@ func InitFlags() {
 		"Load balancer algorithm")
 	flag.BoolVar(&delete_lb, "delete", false,
 		"Load balancer delete obj")
-	flag.StringVar(&fip_pool_arg, "floating-ip", "",
-		"Floating ip for vip")
+	flag.StringVar(&fip_pool_arg, "external-ip", "",
+		"External ip for vip")
 	flag.StringVar(&sec_grps, "security-group", "",
 		"Security group for service")
 	flag.StringVar(&delete_sec_grps, "delete-security-group", "",
@@ -144,7 +144,7 @@ func CreateLoadBalancer(name string) {
 	//instance_ip_obj, err := types.InstanceIpByName(oc_client , strings.Join(fqn, ":"))
 	lb_instance, err := types.LoadbalancerByName(oc_client , strings.Join(fqn, ":"))
 	if lb_instance == nil {
-		fmt.Println("Now creating loadbalancer")
+		//fmt.Println("Now creating loadbalancer")
 		lb_instance = new(types.Loadbalancer)
 		lb_instance.SetParent(project_obj)
 		lb_instance.SetName(name)
@@ -155,7 +155,7 @@ func CreateLoadBalancer(name string) {
 		props.ProvisioningStatus = "ACTIVE"
 		props.OperatingStatus = "ONLINE"
 		if len(overwrite_vip) != 0 {
-			fmt.Printf("Switching to new vip : %s", overwrite_vip)
+			//fmt.Printf("Switching to new vip : %s", overwrite_vip)
 			props.VipAddress = overwrite_vip
 		} else {
 			props.VipAddress = getDockerServiceVip(name)
@@ -165,7 +165,7 @@ func CreateLoadBalancer(name string) {
 		networkFQName.WriteString(os_tenant_name)
 		networkFQName.WriteString(":")
 		networkFQName.WriteString(getDockerServiceNetwork(name))
-		fmt.Printf("----->> %s\n", networkFQName.String())
+		//fmt.Printf("----->> %s\n", networkFQName.String())
 		networkObj, err := types.VirtualNetworkByName(oc_client, networkFQName.String())
 		props.VipSubnetId = getSubnetFromNetwork(networkObj)
 		props.AdminState = true
@@ -197,7 +197,6 @@ func CreateLoadBalancer(name string) {
 			instance_ip_obj := new(types.InstanceIp)
 			instance_ip_obj.SetName(name + "_" + randomdata.SillyName())
 			if len(overwrite_vip) != 0 {
-				fmt.Printf("Switching to new vip : %s", overwrite_vip)
 				instance_ip_obj.SetInstanceIpAddress(overwrite_vip)
 			} else {
 				instance_ip_obj.SetInstanceIpAddress(getDockerServiceVip(name))
@@ -218,12 +217,12 @@ func CreateLoadBalancer(name string) {
 		lb_instance.AddVirtualMachineInterface(interface_obj)
 		err = oc_client.Create(lb_instance)
 		if err != nil {
-			fmt.Printf("Error in creating loadbalancing instance\n")
+			//fmt.Printf("Error in creating loadbalancing instance\n")
 			fmt.Fprint(os.Stderr, err)
 			os.Exit(1)
 		}
 	} else {
-		fmt.Println("Loadbalancer : %s", lb_instance.GetName())
+		//fmt.Println("Loadbalancer : ", lb_instance.GetName())
 		if err != nil {
 			fmt.Printf("Error in finding loadbalancer\n")
 			fmt.Fprint(os.Stderr, err)
@@ -239,7 +238,7 @@ func CreateLoadBalancer(name string) {
 	fqn_lbl = append(fqn_lbl, lbl_name)
 	lbl_instance, err := types.LoadbalancerListenerByName(oc_client , strings.Join(fqn_lbl, ":"))
 	if lbl_instance == nil {
-		fmt.Println("Now creating loadbalancing listener")
+		//fmt.Println("Now creating loadbalancing listener")
 		lbl_instance = new(types.LoadbalancerListener)
 		lbl_instance.SetParent(project_obj)
 		lbl_instance.SetName(lbl_name)
@@ -260,7 +259,7 @@ func CreateLoadBalancer(name string) {
 			os.Exit(1)
 		}
 	} else {
-		fmt.Println("Loadbalancer  listener : %s", lbl_instance.GetName())
+		//fmt.Println("Loadbalancer  listener : ", lbl_instance.GetName())
 		if err != nil {
 			fmt.Printf("Error in finding loadbalancer listener \n")
 			fmt.Fprint(os.Stderr, err)
@@ -276,7 +275,7 @@ func CreateLoadBalancer(name string) {
 	fqn_lbpool = append(fqn_lbpool, lbpool_name)
 	lbpool_instance, err := types.LoadbalancerPoolByName(oc_client , strings.Join(fqn_lbpool, ":"))
 	if lbpool_instance == nil {
-		fmt.Println("Now creating loadbalancing pool")
+		//fmt.Println("Now creating loadbalancing pool")
 		lbpool_instance = new(types.LoadbalancerPool)
 		lbpool_instance.SetParent(project_obj)
 		lbpool_instance.SetName(lbpool_name)
@@ -302,7 +301,7 @@ func CreateLoadBalancer(name string) {
 			os.Exit(1)
 		}
 	} else {
-		fmt.Println("Loadbalancer  pool : %s", lbpool_instance.GetName())
+		//fmt.Println("Loadbalancer  pool : ", lbpool_instance.GetName())
 		if err != nil {
 			fmt.Printf("Error in finding loadbalancer pool \n")
 			fmt.Fprint(os.Stderr, err)
@@ -320,7 +319,7 @@ func CreateLoadBalancer(name string) {
 		fqn_lbmemb = append(fqn_lbmemb, lbmemb_name)
 		lbmemb_instance, err := types.LoadbalancerMemberByName(oc_client , strings.Join(fqn_lbmemb, ":"))
 		if lbmemb_instance == nil {
-			fmt.Println("Now creating loadbalancing member")
+			//fmt.Println("Adding loadbalancing member")
 			lbmemb_instance = new(types.LoadbalancerMember)
 			lbmemb_instance.SetParent(lbpool_instance)
 			lbmemb_instance.SetName(lbmemb_name)
@@ -332,7 +331,7 @@ func CreateLoadBalancer(name string) {
 			vmiFQName.WriteString(":")
 			vmiFQName.WriteString(endpointId)
 			vmiObj, err := types.VirtualMachineInterfaceByName(oc_client, vmiFQName.String())
-			fmt.Printf("VMI----->> %s\n", vmiObj.GetUuid())
+			//fmt.Printf("VMI----->> %s\n", vmiObj.GetUuid())
 			memKeyValuePair := new(types.KeyValuePairs)
 			memKeyValue := new(types.KeyValuePair)
 			memKeyValue.Key = "vmi"
@@ -353,7 +352,7 @@ func CreateLoadBalancer(name string) {
 				os.Exit(1)
 			}
 		} else {
-			fmt.Println("Loadbalancer  listener : %s", lbmemb_instance.GetName())
+			//fmt.Println("Loadbalancer  member : ", lbmemb_instance.GetName())
 			if err != nil {
 				fmt.Printf("Error in finding loadbalancer member \n")
 				fmt.Fprint(os.Stderr, err)
@@ -362,7 +361,7 @@ func CreateLoadBalancer(name string) {
 		}
 	}
 	if delete_all {
-		fmt.Println("Deleting everything")
+		//fmt.Println("Deleting everything")
 		vmi_refs, err := lb_instance.GetVirtualMachineInterfaceRefs()
 		if err != nil {
 			fmt.Printf("Error in retriving vmi from load balancer %s: %v", lb_instance.GetUuid(), err)
@@ -461,7 +460,7 @@ func DeleteLoadBalancer(name string) {
 		vmi_refs, err := lb_instance.GetVirtualMachineInterfaceRefs()
 		if err != nil {
 			fmt.Printf("Error in retriving vmi from load balancer %s: %v", lb_instance.GetUuid(), err)
-			return
+			os.Exit(1)
 		}
 		for lb_container, _ := range getAllContainersIpInService(name) {	
 			var fqn_lbmemb []string
@@ -554,8 +553,8 @@ func getDockerServiceNetwork(service_name string) string {
 	for _, service := range services {
 		//spew.Dump(service)
 		if strings.Compare(service.Spec.Annotations.Name, service_name) == 0 {
-			fmt.Println("->>>>", service.Spec.Annotations.Name)
-			fmt.Println("->>>>", service.Endpoint.VirtualIPs[0].Addr)
+			//fmt.Println("->>>>", service.Spec.Annotations.Name)
+			//fmt.Println("->>>>", service.Endpoint.VirtualIPs[0].Addr)
 			return service.Endpoint.VirtualIPs[0].NetworkID
 		}
 	}
@@ -570,8 +569,8 @@ func getDockerServiceVip(service_name string) string {
 	for _, service := range services {
 		//spew.Dump(service)
 		if strings.Compare(service.Spec.Annotations.Name, service_name) == 0 {
-			fmt.Println("->>>>", service.Spec.Annotations.Name)
-			fmt.Println("->>>>", strings.Split(service.Endpoint.VirtualIPs[0].Addr, "/")[0])
+			//fmt.Println("->>>>", service.Spec.Annotations.Name)
+			//fmt.Println("->>>>", strings.Split(service.Endpoint.VirtualIPs[0].Addr, "/")[0])
 			return strings.Split(service.Endpoint.VirtualIPs[0].Addr,"/")[0]
 		}
 	}
@@ -583,7 +582,7 @@ func getEndpointFromContainerId(container_id string) string {
 		panic(err)
 	}
 	for _, net_value := range (container_info.NetworkSettings.Networks) {
-		fmt.Println("EndpointId : ", net_value.EndpointID)	
+		//fmt.Println("EndpointId : ", net_value.EndpointID)	
 		return net_value.EndpointID
 	}
 	return "ERR"
@@ -602,7 +601,7 @@ func getAllContainersIpInService(service_name string) map[string]string {
 				if strings.Compare(service_name,value) == 0 {
 					//container_map[container.ID] = container.NetworkSettings.Networks		
 					for _, net_value := range (container.NetworkSettings.Networks) {
-						fmt.Println("LB IP ADDR : ", net_value.IPAddress)	
+						//fmt.Println("LB IP ADDR : ", net_value.IPAddress)	
 						container_map[container.ID] = net_value.IPAddress
 						break
 					}
@@ -616,7 +615,7 @@ func getAllContainersIpInService(service_name string) map[string]string {
 func getSubnetFromNetwork(networkObj *types.VirtualNetwork) string {
 	net_ipams, _ := networkObj.GetNetworkIpamRefs()
 	for _, net_ipam := range net_ipams {
-		fmt.Printf("Subnet uuid: %s\n", net_ipam.Attr.(types.VnSubnetsType).IpamSubnets[0].SubnetUuid)
+		//fmt.Printf("Subnet uuid: %s\n", net_ipam.Attr.(types.VnSubnetsType).IpamSubnets[0].SubnetUuid)
 		return net_ipam.Attr.(types.VnSubnetsType).IpamSubnets[0].SubnetUuid
 	}
 	return "ERR"
@@ -644,13 +643,13 @@ func addFloatingIp(vmi_uuid string, fip_pool_arg string) {
 	}
 	fip_arr := strings.Split(fip_pool_arg, ":")
     	public_network, fip_pool, ip_addr := fip_arr[0], fip_arr[1], fip_arr[2]
-	fmt.Println(public_network, fip_pool, ip_addr)
+	//fmt.Println(public_network, fip_pool, ip_addr)
 	var fqn_fippool []string
 	fqn_fippool = append(fqn_fippool, "default-domain")
 	fqn_fippool = append(fqn_fippool, os_tenant_name)
 	fqn_fippool = append(fqn_fippool, public_network)
 	fqn_fippool = append(fqn_fippool, fip_pool)
-	fmt.Println(strings.Join(fqn_fippool, ":"))
+	//fmt.Println(strings.Join(fqn_fippool, ":"))
 	fip_pool_obj, err := types.FloatingIpPoolByName(oc_client , strings.Join(fqn_fippool, ":"))
 	if err != nil {
 		fmt.Printf("Error in finding fip pool obj\n")
@@ -666,9 +665,9 @@ func addFloatingIp(vmi_uuid string, fip_pool_arg string) {
 	floating_obj.SetFloatingIpIsVirtualIp(true)
 	err = oc_client.Create(floating_obj)
 	if err != nil {
-		fmt.Printf("Error in updating security grp  instance\n")
-		fmt.Fprint(os.Stderr, err)
-		os.Exit(1)
+		fmt.Printf("Floating ip is already there\n")
+		//fmt.Fprint(os.Stderr, err)
+		//os.Exit(1)
 	}
 	
 		
@@ -682,7 +681,7 @@ func deleteSecurityGroups(){
 		vmiFQName.WriteString(os_tenant_name)
 		vmiFQName.WriteString(":")
 		vmiFQName.WriteString(endpointId)
-		fmt.Println(vmiFQName.String())
+		//fmt.Println(vmiFQName.String())
 		vmiObj, err := types.VirtualMachineInterfaceByName(oc_client, vmiFQName.String())
 		if err != nil {
 			fmt.Printf("Error in finding vmi instance\n")
@@ -695,7 +694,7 @@ func deleteSecurityGroups(){
 		secFQName.WriteString(os_tenant_name)
 		secFQName.WriteString(":")
 		secFQName.WriteString(delete_sec_grps)
-		fmt.Println(secFQName.String())
+		//fmt.Println(secFQName.String())
 		secObj, err := types.SecurityGroupByName(oc_client, secFQName.String())
 		if err != nil {
 			fmt.Printf("Error in finding security grp instance\n")
@@ -720,7 +719,7 @@ func applySecurityGroups() {
 		vmiFQName.WriteString(os_tenant_name)
 		vmiFQName.WriteString(":")
 		vmiFQName.WriteString(endpointId)
-		fmt.Println(vmiFQName.String())
+		//fmt.Println(vmiFQName.String())
 		vmiObj, err := types.VirtualMachineInterfaceByName(oc_client, vmiFQName.String())
 		if err != nil {
 			fmt.Printf("Error in finding vmi instance\n")
@@ -733,7 +732,7 @@ func applySecurityGroups() {
 		secFQName.WriteString(os_tenant_name)
 		secFQName.WriteString(":")
 		secFQName.WriteString(sec_grps)
-		fmt.Println(secFQName.String())
+		//fmt.Println(secFQName.String())
 		secObj, err := types.SecurityGroupByName(oc_client, secFQName.String())
 		
 		//secObj, err := types.SecurityGroupByUuid(oc_client, "709438cc-7fe2-4401-8e36-d4ca6d996608")
@@ -767,7 +766,7 @@ func main() {
 	oc_client = contrail.NewClient(oc_server, oc_port)
 	//networkList(oc_client)
 
-	fmt.Println("Service name: ", service_name)
+	//fmt.Println("Service name: ", service_name)
 	var err error
 	docker_cli, err = docker_client.NewEnvClient()
 	if err != nil {
@@ -778,12 +777,12 @@ func main() {
 	//getAllContainersIpInService(service_name)
 	//getDockerServiceNetwork(service_name)
 	if len(delete_sec_grps) != 0 {
-		fmt.Printf("Removing security group : %s", delete_sec_grps)
+		//fmt.Println("Removing security group : ", delete_sec_grps)
 		deleteSecurityGroups()
 		return
 	}
 	if len(sec_grps) != 0 {
-		fmt.Printf(" Apply security group : %s", sec_grps)
+		//fmt.Println("Apply security group : ", sec_grps)
 		applySecurityGroups()
 		return
 	}
